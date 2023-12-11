@@ -7,6 +7,7 @@ import json
 import pathlib
 import sqlite_utils
 import sys
+import uuid
 import textwrap
 import urllib.parse
 from .utils import (
@@ -120,20 +121,30 @@ def events(database, calendars, auth, verbose):
             calendar_id
         )
         events = paginate_all(client, url, "items")
-        db["calendars"].upsert(
-            {
-                "id": calendar_id,
-            },
-            pk="id",
-        )
-        # Flatten specific keys
+        # db["calendars"].upsert(
+        #    {
+        #        "id": calendar_id,
+        #    },
+        #    pk="id",
+        # )
+
+        # Flatten specific keys; augment the event with our own application specifics keys: calendar_id, and sundial_uuid
         events = (
-            dict(flatten_keys(dict(event, calendar_id=calendar_id), ("start", "end")))
+            dict(flatten_keys(dict(event, calendar_id=calendar_id, sundial_uuid=uuid.uuid4()), ("start", "end")))
             for event in events
         )
+
+        # For each event in events, add a top level field called sundial_uuid. We need to generate this
+        # because the id isn't unique, a compound id, cal_id isn't unique either. having no key makes
+        # post processing very slow.
+        # for event in events:
+        #    event['sundial_uuid'] = os.urandom(16)
+
         db["events"].insert_all(
             events,
-            pk="id",
+            # pk=("id", "calendar_id"), ## for SingleEvents = TRUE, this is not unique
+            # pg = () ## for SingleEvents = TRUE, this is not unique
+            pk=("sundial_uuid"),
             column_order=(
                 "id",
                 "summary",
@@ -144,7 +155,8 @@ def events(database, calendars, auth, verbose):
                 "calendar_id",
             ),
             alter=True,
-            foreign_keys=(("calendar_id", "calendars", "id"),),
+            # foreign_keys=(("calendar_id", "calendars", "id"),),
+            foreign_keys=(),
         )
 
 

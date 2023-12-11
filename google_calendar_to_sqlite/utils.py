@@ -2,6 +2,8 @@ from contextlib import contextmanager
 import click
 import httpx
 import itertools
+import datetime
+import json
 from time import sleep
 
 
@@ -98,6 +100,25 @@ def paginate_all(client, url, pagination_key):
     next_page_token = None
     while True:
         params = {}
+        params["maxAttendees"] = 4096
+        params["maxResults"] = 2500
+        params["singleEvents"] = True
+        # verify 'singleEvents' is what we expect wrt to expanding/collapsed recurring events
+        # https://developers.google.com/calendar/api/v3/reference/events/list
+
+        # RFC3339 timestamp with mandatory time zone offset
+        one_year_ago = datetime.datetime.now() - datetime.timedelta(days=365)
+        one_year_ago = one_year_ago.isoformat() + 'Z' # 'Z' indicates UTC time
+
+        one_month_ago = datetime.datetime.now() - datetime.timedelta(days=30)
+        one_month_ago = one_month_ago.isoformat() + 'Z' # 'Z' indicates UTC time
+
+        one_month_from_now = datetime.datetime.now() + datetime.timedelta(days=30)
+        one_month_from_now = one_month_from_now.isoformat() + 'Z' # 'Z' indicates UTC time
+
+        params["timeMax"] = one_month_from_now
+        params["timeMin"] = one_year_ago
+
         if next_page_token is not None:
             params["pageToken"] = next_page_token
         response = client.get(
@@ -106,7 +127,17 @@ def paginate_all(client, url, pagination_key):
         )
         data = response.json()
         if response.status_code != 200:
-            raise click.ClickException(json.dumps(data, indent=4))
+            if response.status_code == 429:
+                # Rate limited, wait a bit and try again
+                sleep(2)
+                continue
+            elif response.status_code == 404:
+                print("404")
+                # 404 means the calendar is not found, which is fine
+                return
+            else:
+                raise click.ClickException(json.dumps(data, indent=4))
+
         # Paginate using the specified key and nextPageToken
         if pagination_key not in data:
             raise click.ClickException(
